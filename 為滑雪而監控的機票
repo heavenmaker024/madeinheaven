@@ -1,0 +1,68 @@
+import requests
+from datetime import datetime, timezone, timedelta
+
+# 1. 設定區：您的專屬金鑰與目標條件
+SERPAPI_KEY = "****"
+TARGET_PRICE = 27000
+PASSENGERS = 4  # 3大1小
+
+TARGET_COMBOS = {
+    "1_日本航空 (JAL)": {"out": "JL96",  "in": "JL809"},
+    "2_中華航空 (CI)":  {"out": "CI220", "in": "CI105"},
+    "3_長榮航空 (BR)":  {"out": "BR192", "in": "BR195"}
+}
+
+def clean_no(no):
+    return str(no).replace(" ", "").strip().upper()
+
+def check_google_flights():
+    tw_now = datetime.now(timezone(timedelta(hours=8))).strftime('%Y-%m-%d %H:%M:%S')
+    print(f"[{tw_now}] 開始掃描 TSA->HND (01/28) / NRT->TPE (02/03) 真實報價...\n")
+
+    params = {
+        "engine": "google_flights",
+        "api_key": SERPAPI_KEY.strip(),
+        "type": "3",
+        "multi_city_json": '[{"departure_id":"TSA","arrival_id":"HND","date":"2027-01-28"},{"departure_id":"NRT","arrival_id":"TPE","date":"2027-02-03"}]',
+        "adults": "3",
+        "children": "1",
+        "stops": "1",
+        "currency": "TWD",
+        "hl": "zh-TW",
+        "gl": "tw"
+    }
+
+    res_out = requests.get("https://serpapi.com/search", params=params).json()
+    if "error" in res_out:
+        print("API 錯誤:", res_out["error"])
+        return
+
+    out_list = res_out.get("best_flights", []) + res_out.get("other_flights", [])
+
+    for name, target in TARGET_COMBOS.items():
+        m_out = next((f for f in out_list if clean_no(f["flights"][0].get("flight_number")) == target["out"]), None)
+        if not m_out or not m_out.get("departure_token"):
+            print(f"⚠️ 【{name}】 未找到去程 {target['out']}")
+            continue
+
+        params_in = params.copy()
+        params_in["departure_token"] = m_out["departure_token"]
+        res_in = requests.get("https://serpapi.com/search", params=params_in).json()
+        in_list = res_in.get("best_flights", []) + res_in.get("other_flights", [])
+
+        m_in = next((f for f in in_list if clean_no(f["flights"][0].get("flight_number")) == target["in"]), None)
+        if m_in:
+            total = m_in.get("price", 0)
+            avg = int(total / PASSENGERS)
+            diff = avg - TARGET_PRICE
+            print(f"✈️ 【{name}】 {target['out']} (01/28) + {target['in']} (02/03)")
+            print(f"   💰 4人總價: NT$ {total:,} | 平均單人: NT$ {avg:,}")
+            if diff <= 0:
+                print(f"   🚨 【達標警報！】已低於目標價 NT$ {TARGET_PRICE:,}，請準備出手！\n")
+            else:
+                print(f"   ⏳ 距離目標價還差: NT$ {diff:,} /人\n")
+        else:
+            print(f"⚠️ 【{name}】 未找到搭配回程 {target['in']} 的報價\n")
+
+# 執行查詢 (請確認複製時有包含這最後一行)
+check_google_flights()
